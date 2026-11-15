@@ -91,6 +91,37 @@ body {
 }
 
 
+/* Data management buttons */
+
+.data-controls {
+  position: absolute;
+  z-index: 1000;
+  left: 20px;
+  bottom: 24px;
+
+  display: flex;
+  gap: 8px;
+}
+
+.data-button {
+  padding: 12px 15px;
+
+  border: none;
+  border-radius: 25px;
+
+  background: #ffffff;
+  color: #222222;
+
+  font-size: 13px;
+  cursor: pointer;
+
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.data-button:active {
+  transform: scale(0.97);
+}
+
 
 
 

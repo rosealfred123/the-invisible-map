@@ -5,13 +5,11 @@
 
 const maptilerKey = "2E4wY5kv31hlD5duk20H";
 
-// Center map on London
 const map = L.map("map").setView(
   [51.5072, -0.1276],
   13
 );
 
-// Load MapTiler map
 L.tileLayer(
   `https://api.maptiler.com/maps/streets-v4/{z}/{x}/{y}.png?key=${maptilerKey}`,
   {
@@ -26,7 +24,147 @@ L.tileLayer(
 
 
 // ------------------------------------
-// 2. ADD PIN FUNCTIONALITY
+// 2. LOAD AND SAVE DATA
+// ------------------------------------
+
+function loadSavedData(key, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (error) {
+    console.error("Could not load saved data:", error);
+    return fallback;
+  }
+}
+
+function saveMapData() {
+  localStorage.setItem(
+    "invisibleMapRoute",
+    JSON.stringify(routeCoordinates)
+  );
+
+  localStorage.setItem(
+    "invisibleMapPins",
+    JSON.stringify(savedPins)
+  );
+}
+
+
+// Load existing route data
+let routeCoordinates = loadSavedData(
+  "invisibleMapRoute",
+  []
+);
+
+// Keep only valid GPS coordinates
+routeCoordinates = routeCoordinates.filter(position =>
+  Array.isArray(position) &&
+  position.length === 2 &&
+  Number.isFinite(position[0]) &&
+  Number.isFinite(position[1]) &&
+  Math.abs(position[0]) <= 90 &&
+  Math.abs(position[1]) <= 180
+);
+
+
+// Load saved pins
+let savedPins = loadSavedData(
+  "invisibleMapPins",
+  []
+);
+
+// Keep only valid pins
+savedPins = savedPins.filter(pin =>
+  pin &&
+  Number.isFinite(pin.lat) &&
+  Number.isFinite(pin.lng) &&
+  Math.abs(pin.lat) <= 90 &&
+  Math.abs(pin.lng) <= 180
+);
+
+
+// ------------------------------------
+// 3. MAP LAYERS
+// ------------------------------------
+
+map.createPane("fogPane");
+map.getPane("fogPane").style.zIndex = 450;
+
+map.createPane("memoryPane");
+map.getPane("memoryPane").style.zIndex = 460;
+
+
+// Route line
+const routeLine = L.polyline(routeCoordinates, {
+  color: "#333333",
+  weight: 2,
+  opacity: 0.35,
+  pane: "memoryPane"
+}).addTo(map);
+
+
+// Memory circles
+const memoryLayer = L.layerGroup().addTo(map);
+
+
+// Pin layer
+const pinLayer = L.layerGroup().addTo(map);
+
+
+// Draw saved memory circles
+function drawMemoryCircles() {
+
+  memoryLayer.clearLayers();
+
+  routeCoordinates.forEach(position => {
+
+    L.circle(position, {
+      radius: 20,
+      stroke: false,
+      fillColor: "#222222",
+      fillOpacity: 0.08,
+      pane: "memoryPane"
+    }).addTo(memoryLayer);
+
+  });
+
+}
+
+
+// Draw saved pins
+function drawPins() {
+
+  pinLayer.clearLayers();
+
+  savedPins.forEach(pin => {
+
+    L.marker([pin.lat, pin.lng]).addTo(pinLayer);
+
+  });
+
+}
+
+
+drawMemoryCircles();
+drawPins();
+
+
+// Restore saved route position
+if (routeCoordinates.length > 1) {
+
+  map.fitBounds(routeLine.getBounds(), {
+    padding: [30, 30]
+  });
+
+} else if (routeCoordinates.length === 1) {
+
+  map.setView(routeCoordinates[0], 16);
+
+}
+
+
+// ------------------------------------
+// 4. ADD PIN FUNCTIONALITY
 // ------------------------------------
 
 let addingPin = false;
@@ -49,82 +187,31 @@ addPinButton.addEventListener("click", () => {
 
 });
 
-map.on("click", (event) => {
+
+map.on("click", event => {
 
   if (!addingPin) return;
 
-  L.marker(event.latlng).addTo(map);
+  const newPin = {
+    lat: event.latlng.lat,
+    lng: event.latlng.lng
+  };
 
+  // Add pin to saved data
+  savedPins.push(newPin);
+
+  // Draw the pin
+  L.marker(event.latlng).addTo(pinLayer);
+
+  // Save everything
+  saveMapData();
+
+  // Exit pin mode
   addingPin = false;
   addPinButton.textContent = "+";
   addPinButton.title = "Add a pin";
 
 });
-
-
-// ------------------------------------
-// 3. GPS TRACKING SETUP
-// ------------------------------------
-
-const trackingButton = document.getElementById("trackingButton");
-const trackingStatus = document.getElementById("trackingStatus");
-
-let tracking = false;
-let watchId = null;
-let currentLocationMarker = null;
-
-// Load saved coordinates
-let routeCoordinates = JSON.parse(
-  localStorage.getItem("invisibleMapRoute") || "[]"
-);
-
-
-// ------------------------------------
-// 4. MAP VISUAL LAYERS
-// ------------------------------------
-
-// Create map panes
-map.createPane("fogPane");
-map.getPane("fogPane").style.zIndex = 450;
-
-map.createPane("memoryPane");
-map.getPane("memoryPane").style.zIndex = 460;
-
-
-// Route line
-const routeLine = L.polyline(routeCoordinates, {
-  color: "#333333",
-  weight: 2,
-  opacity: 0.35,
-  pane: "memoryPane"
-}).addTo(map);
-
-
-// Memory circles
-const memoryLayer = L.layerGroup().addTo(map);
-
-// Restore saved memory circles
-routeCoordinates.forEach((position) => {
-
-  L.circle(position, {
-    radius: 20,
-    stroke: false,
-    fillColor: "#222222",
-    fillOpacity: 0.08,
-    pane: "memoryPane"
-  }).addTo(memoryLayer);
-
-});
-
-
-// Restore saved route position
-if (routeCoordinates.length > 0) {
-
-  map.fitBounds(routeLine.getBounds(), {
-    padding: [30, 30]
-  });
-
-}
 
 
 // ------------------------------------
@@ -134,51 +221,8 @@ if (routeCoordinates.length > 0) {
 let fogLayer = null;
 
 
-// Create a circular area around a GPS position
-function createCircleRing(center, radius, steps = 32) {
-
-  const earthRadius = 6378137;
-
-  const lat = center[0] * Math.PI / 180;
-  const lng = center[1] * Math.PI / 180;
-
-  const angularDistance = radius / earthRadius;
-
-  const points = [];
-
-  for (let i = 0; i < steps; i++) {
-
-    const bearing = 2 * Math.PI * i / steps;
-
-    const newLat = Math.asin(
-      Math.sin(lat) * Math.cos(angularDistance) +
-      Math.cos(lat) * Math.sin(angularDistance) *
-      Math.cos(bearing)
-    );
-
-    const newLng = lng + Math.atan2(
-      Math.sin(bearing) * Math.sin(angularDistance) *
-      Math.cos(lat),
-      Math.cos(angularDistance) -
-      Math.sin(lat) * Math.sin(newLat)
-    );
-
-    points.push([
-      newLat * 180 / Math.PI,
-      newLng * 180 / Math.PI
-    ]);
-
-  }
-
-  return points;
-
-}
-
-
-
 function updateFogLayer() {
 
-  // Remove the previous fog
   if (fogLayer !== null) {
     map.removeLayer(fogLayer);
   }
@@ -188,7 +232,6 @@ function updateFogLayer() {
   const southWest = bounds.getSouthWest();
   const northEast = bounds.getNorthEast();
 
-  // Outer fog boundary
   const outerRing = [
     [southWest.lat, southWest.lng],
     [southWest.lat, northEast.lng],
@@ -199,14 +242,12 @@ function updateFogLayer() {
 
   const holes = [];
 
-  // Create a continuous revealed area around the route
   if (routeCoordinates.length > 0) {
 
     let routeFeature;
 
     if (routeCoordinates.length === 1) {
 
-      // If there is only one GPS point, create a circle
       const position = routeCoordinates[0];
 
       routeFeature = turf.point([
@@ -216,7 +257,6 @@ function updateFogLayer() {
 
     } else {
 
-      // Convert GPS coordinates into Turf's format
       const coordinates = routeCoordinates.map(position => [
         position[1],
         position[0]
@@ -226,14 +266,12 @@ function updateFogLayer() {
 
     }
 
-    // Expand the route by 65 metres
     const revealedArea = turf.buffer(
       routeFeature,
       65,
       { units: "meters" }
     );
 
-    // Get the polygon boundaries
     if (revealedArea.geometry.type === "Polygon") {
 
       holes.push(
@@ -260,7 +298,6 @@ function updateFogLayer() {
 
   }
 
-  // Draw the fog with the continuous revealed area
   fogLayer = L.polygon(
     [outerRing, ...holes],
     {
@@ -276,17 +313,22 @@ function updateFogLayer() {
 }
 
 
-
-// Draw fog initially
 updateFogLayer();
 
-// Update fog when the map moves or zooms
 map.on("moveend zoomend", updateFogLayer);
 
 
 // ------------------------------------
-// 6. START GPS TRACKING
+// 6. GPS TRACKING
 // ------------------------------------
+
+const trackingButton = document.getElementById("trackingButton");
+const trackingStatus = document.getElementById("trackingStatus");
+
+let tracking = false;
+let watchId = null;
+let currentLocationMarker = null;
+
 
 trackingButton.addEventListener("click", () => {
 
@@ -317,13 +359,12 @@ function startTracking() {
 
   watchId = navigator.geolocation.watchPosition(
 
-    (position) => {
+    position => {
 
       const latitude = position.coords.latitude;
       const longitude = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
-      // Ignore very inaccurate locations
       if (accuracy > 1000) {
 
         trackingStatus.textContent =
@@ -336,7 +377,6 @@ function startTracking() {
 
       const newPosition = [latitude, longitude];
 
-      // Move map to current location
       map.setView(newPosition, 16);
 
       // Create or update location marker
@@ -369,8 +409,10 @@ function startTracking() {
         );
 
         if (distance < 5) {
+
           trackingStatus.textContent = "GPS tracking active";
           return;
+
         }
 
       }
@@ -379,7 +421,6 @@ function startTracking() {
       // Add new GPS position
       routeCoordinates.push(newPosition);
 
-      // Update route line
       routeLine.setLatLngs(routeCoordinates);
 
 
@@ -393,23 +434,19 @@ function startTracking() {
       }).addTo(memoryLayer);
 
 
-      // Update fog
+      // Update reveal effect
       updateFogLayer();
 
 
-      // Save coordinates
-      localStorage.setItem(
-        "invisibleMapRoute",
-        JSON.stringify(routeCoordinates)
-      );
+      // Save route and pins
+      saveMapData();
 
       trackingStatus.textContent = "GPS tracking active";
 
     },
 
 
-    // GPS errors
-    (error) => {
+    error => {
 
       if (error.code === 1) {
 
@@ -433,7 +470,6 @@ function startTracking() {
     },
 
 
-    // GPS settings
     {
       enableHighAccuracy: true,
       maximumAge: 5000,
@@ -464,3 +500,175 @@ function stopTracking() {
   trackingStatus.textContent = "Tracking is off";
 
 }
+
+
+// ------------------------------------
+// 8. EXPORT MAP DATA
+// ------------------------------------
+
+const exportButton = document.getElementById("exportButton");
+
+exportButton.addEventListener("click", () => {
+
+  const backup = {
+    app: "The Invisible Map",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    route: routeCoordinates,
+    pins: savedPins
+  };
+
+  const file = new Blob(
+    [JSON.stringify(backup, null, 2)],
+    { type: "application/json" }
+  );
+
+  const fileURL = URL.createObjectURL(file);
+
+  const downloadLink = document.createElement("a");
+
+  downloadLink.href = fileURL;
+  downloadLink.download = "invisible-map-backup.json";
+
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  document.body.removeChild(downloadLink);
+
+  setTimeout(() => {
+    URL.revokeObjectURL(fileURL);
+  }, 1000);
+
+});
+
+
+// ------------------------------------
+// 9. IMPORT MAP DATA
+// ------------------------------------
+
+const importButton = document.getElementById("importButton");
+const importFile = document.getElementById("importFile");
+
+importButton.addEventListener("click", () => {
+
+  importFile.click();
+
+});
+
+
+importFile.addEventListener("change", event => {
+
+  const file = event.target.files[0];
+
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = () => {
+
+    try {
+
+      const backup = JSON.parse(reader.result);
+
+      // Check the backup structure
+      if (
+        backup.app !== "The Invisible Map" ||
+        !Array.isArray(backup.route) ||
+        !Array.isArray(backup.pins)
+      ) {
+
+        alert("This file is not a valid Invisible Map backup.");
+        return;
+
+      }
+
+      // Validate imported route
+      const validRoute = backup.route.every(position =>
+        Array.isArray(position) &&
+        position.length === 2 &&
+        Number.isFinite(position[0]) &&
+        Number.isFinite(position[1]) &&
+        Math.abs(position[0]) <= 90 &&
+        Math.abs(position[1]) <= 180
+      );
+
+      // Validate imported pins
+      const validPins = backup.pins.every(pin =>
+        pin &&
+        Number.isFinite(pin.lat) &&
+        Number.isFinite(pin.lng) &&
+        Math.abs(pin.lat) <= 90 &&
+        Math.abs(pin.lng) <= 180
+      );
+
+      if (!validRoute || !validPins) {
+
+        alert("The backup contains invalid map data.");
+        return;
+
+      }
+
+      const confirmed = confirm(
+        "Import this backup? Your current route and pins on this device will be replaced."
+      );
+
+      if (!confirmed) return;
+
+
+      // Replace current data
+      routeCoordinates = backup.route;
+      savedPins = backup.pins;
+
+
+      // Redraw map layers
+      routeLine.setLatLngs(routeCoordinates);
+
+      drawMemoryCircles();
+      drawPins();
+
+      // Update saved data
+      saveMapData();
+
+      // Update the reveal effect
+      updateFogLayer();
+
+
+      // Adjust map view
+      if (routeCoordinates.length > 1) {
+
+        map.fitBounds(routeLine.getBounds(), {
+          padding: [30, 30]
+        });
+
+      } else if (routeCoordinates.length === 1) {
+
+        map.setView(routeCoordinates[0], 16);
+
+      } else if (savedPins.length > 0) {
+
+        map.setView(
+          [savedPins[0].lat, savedPins[0].lng],
+          16
+        );
+
+      }
+
+      alert("Your map backup was imported successfully!");
+
+    } catch (error) {
+
+      alert("Could not read this backup file.");
+
+      console.error(error);
+
+    } finally {
+
+      // Allow selecting the same file again
+      importFile.value = "";
+
+    }
+
+  };
+
+  reader.readAsText(file);
+
+});

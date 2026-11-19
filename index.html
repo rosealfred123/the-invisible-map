@@ -1,39 +1,55 @@
+
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>Invisible Map</title>
 
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  >
 
   <!-- My CSS -->
   <link rel="stylesheet" href="style.css">
+
 </head>
 
 <body>
 
   <div id="map"></div>
 
+
   <!-- GPS tracking button -->
   <button id="trackingButton" class="tracking-button">
     Start tracking
   </button>
 
+
   <!-- Add a pin button -->
-  <button id="addPinButton" class="add-pin-button" aria-label="Add a pin" title="Add a pin">
+  <button
+    id="addPinButton"
+    class="add-pin-button"
+    aria-label="Add a pin"
+    title="Add a pin"
+  >
     +
   </button>
+
 
   <!-- Tracking status -->
   <div id="trackingStatus" class="tracking-status">
     Tracking is off
   </div>
-  
+
+
   <!-- Data management buttons -->
   <div class="data-controls">
+
     <button id="exportButton" class="data-button">
       Export map
     </button>
@@ -42,15 +58,20 @@
       Import map
     </button>
 
-    <input type="file" id="importFile" accept=".json,application/json" hidden>
+    <input
+      type="file"
+      id="importFile"
+      accept=".json,application/json"
+      hidden
+    >
+
   </div>
-
-
 
 
   <!-- Leaflet JavaScript -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Turf.js -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
 
   <!-- My JavaScript -->

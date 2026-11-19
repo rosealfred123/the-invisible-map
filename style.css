@@ -1,4 +1,8 @@
 
+/* ----------------------------------
+   1. GENERAL
+---------------------------------- */
+
 html,
 body {
   margin: 0;
@@ -6,14 +10,41 @@ body {
   width: 100%;
   height: 100%;
   position: relative;
+
+  font-family: Arial, Helvetica, sans-serif;
+  color: #383832;
 }
 
 #map {
   width: 100%;
   height: 100%;
+  background: #eae5da;
 }
 
-/* Add pin button */
+
+/* ----------------------------------
+   2. GENERAL BUTTON STYLE
+---------------------------------- */
+
+.add-pin-button,
+.tracking-button,
+.data-button {
+  font-family: inherit;
+  border: 1px solid rgba(56, 56, 50, 0.12);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.add-pin-button:hover,
+.tracking-button:hover,
+.data-button:hover {
+  transform: translateY(-2px);
+}
+
+
+/* ----------------------------------
+   3. ADD PIN BUTTON
+---------------------------------- */
 
 .add-pin-button {
   position: absolute;
@@ -21,107 +52,199 @@ body {
   right: 24px;
   bottom: 24px;
 
-  width: 56px;
-  height: 56px;
+  width: 54px;
+  height: 54px;
 
-  border: none;
   border-radius: 50%;
+  background: #BD765F;
+  color: #FFFFFF;
 
-  background: #000000;
-  color: white;
-
-  font-size: 34px;
+  font-size: 30px;
   font-weight: 300;
-  line-height: 1;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  transition: transform 0.2s ease;
+  box-shadow: 0 5px 20px rgba(40, 38, 32, 0.15);
 }
 
 .add-pin-button:hover {
-  transform: scale(1.08);
+  background: #A9604D;
 }
 
-/* GPS tracking button */
+
+/* ----------------------------------
+   4. GPS TRACKING BUTTON
+---------------------------------- */
 
 .tracking-button {
   position: absolute;
   z-index: 1000;
-  right: 92px;
-  bottom: 32px;
+  right: 94px;
+  bottom: 30px;
 
-  padding: 12px 18px;
+  padding: 13px 19px;
 
-  border: none;
   border-radius: 30px;
+  background: #f8f6f1;
+  color: #383832;
 
-  background: #000000;
-  color: white;
+  font-size: 13px;
+  letter-spacing: 0.2px;
 
-  font-size: 14px;
+  border-color: rgba(113, 143, 130, 0.4);
 
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 5px 20px rgba(40, 38, 32, 0.12);
 }
 
-/* Tracking status */
+.tracking-button:hover {
+  background: #E5EBE5;
+}
+
+
+/* ----------------------------------
+   5. TRACKING STATUS
+---------------------------------- */
 
 .tracking-status {
   position: absolute;
   z-index: 1000;
-  top: 20px;
+  top: 22px;
   left: 50%;
   transform: translateX(-50%);
 
-  padding: 10px 16px;
+  padding: 10px 17px;
 
-  background: white;
-  border-radius: 20px;
+  background: rgba(248, 246, 241, 0.94);
+  color: #55554b;
 
-  font-size: 13px;
-  color: #333;
+  border: 1px solid rgba(56, 56, 50, 0.1);
+  border-radius: 30px;
 
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+
+  box-shadow: 0 4px 16px rgba(40, 38, 32, 0.08);
+  backdrop-filter: blur(10px);
+
   white-space: nowrap;
 }
 
 
-/* Data management buttons */
+/* ----------------------------------
+   6. DATA CONTROLS
+---------------------------------- */
 
 .data-controls {
   position: absolute;
   z-index: 1000;
-  left: 20px;
-  bottom: 24px;
+  left: 24px;
+  bottom: 28px;
 
   display: flex;
   gap: 8px;
 }
 
 .data-button {
-  padding: 12px 15px;
+  padding: 11px 16px;
 
-  border: none;
   border-radius: 25px;
+  background: rgba(248, 246, 241, 0.95);
+  color: #383832;
 
-  background: #ffffff;
-  color: #222222;
+  font-size: 12px;
+  letter-spacing: 0.2px;
 
-  font-size: 13px;
-  cursor: pointer;
-
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 16px rgba(40, 38, 32, 0.1);
+  backdrop-filter: blur(10px);
 }
 
 .data-button:active {
   transform: scale(0.97);
 }
 
+.data-button:hover {
+  background: #EAE5DA;
+}
 
 
+/* ----------------------------------
+   7. LEAFLET ZOOM CONTROLS
+---------------------------------- */
 
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 4px 16px rgba(40, 38, 32, 0.12) !important;
+  overflow: hidden;
+  border-radius: 8px !important;
+}
+
+.leaflet-control-zoom a {
+  background: #f8f6f1 !important;
+  color: #383832 !important;
+  border: none !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #ffffff !important;
+}
+
+
+/* ----------------------------------
+   8. MAP ATTRIBUTION
+---------------------------------- */
+
+.leaflet-control-attribution {
+  background: rgba(248, 246, 241, 0.8) !important;
+  color: #77766d !important;
+  font-size: 9px !important;
+}
+
+
+/* ----------------------------------
+   9. SOFT FOG / ORGANIC REVEAL
+---------------------------------- */
+
+.leaflet-fog-pane {
+  filter: blur(3px);
+}
+
+
+/* ----------------------------------
+   10. MOBILE
+---------------------------------- */
+
+@media (max-width: 600px) {
+
+  .data-controls {
+    left: 14px;
+    bottom: 18px;
+    gap: 6px;
+  }
+
+  .data-button {
+    padding: 10px 12px;
+    font-size: 11px;
+  }
+
+  .add-pin-button {
+    right: 14px;
+    bottom: 18px;
+    width: 50px;
+    height: 50px;
+  }
+
+  .tracking-button {
+    right: 76px;
+    bottom: 24px;
+    padding: 11px 14px;
+    font-size: 12px;
+  }
+
+  .tracking-status {
+    top: 16px;
+    font-size: 11px;
+  }
+
+}

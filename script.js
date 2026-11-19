@@ -1,91 +1,38 @@
 
-// ------------------------------------
-// 1. MAP SETUP
-// ------------------------------------
+// ==========================================
+// THE INVISIBLE MAP
+// Main JavaScript
+// ==========================================
 
+
+// 1. MAP SETUP
+// ==========================================
+
+// IMPORTANT: Put your new, restricted MapTiler key here.
 const maptilerKey = "2E4wY5kv31hlD5duk20H";
 
-const map = L.map("map").setView(
-  [51.5072, -0.1276],
-  13
-);
+const map = L.map("map", {
+  zoomControl: false
+}).setView([51.5074, -0.1278], 13);
 
 L.tileLayer(
-  `https://api.maptiler.com/maps/streets-v4/{z}/{x}/{y}.png?key=${maptilerKey}`,
+  `https://api.maptiler.com/maps/dataviz-v4/{z}/{x}/{y}.png?key=${maptilerKey}`,
   {
     tileSize: 512,
     zoomOffset: -1,
     minZoom: 1,
     attribution:
-      '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; OpenStreetMap contributors',
-    crossOrigin: true
+      '&copy; <a href="https://www.maptiler.com/">MapTiler</a> &copy; OpenStreetMap contributors'
   }
 ).addTo(map);
 
-
-// ------------------------------------
-// 2. LOAD AND SAVE DATA
-// ------------------------------------
-
-function loadSavedData(key, fallback) {
-  try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : fallback;
-  } catch (error) {
-    console.error("Could not load saved data:", error);
-    return fallback;
-  }
-}
-
-function saveMapData() {
-  localStorage.setItem(
-    "invisibleMapRoute",
-    JSON.stringify(routeCoordinates)
-  );
-
-  localStorage.setItem(
-    "invisibleMapPins",
-    JSON.stringify(savedPins)
-  );
-}
+L.control.zoom({
+  position: "bottomright"
+}).addTo(map);
 
 
-// Load existing route data
-let routeCoordinates = loadSavedData(
-  "invisibleMapRoute",
-  []
-);
-
-// Keep only valid GPS coordinates
-routeCoordinates = routeCoordinates.filter(position =>
-  Array.isArray(position) &&
-  position.length === 2 &&
-  Number.isFinite(position[0]) &&
-  Number.isFinite(position[1]) &&
-  Math.abs(position[0]) <= 90 &&
-  Math.abs(position[1]) <= 180
-);
-
-
-// Load saved pins
-let savedPins = loadSavedData(
-  "invisibleMapPins",
-  []
-);
-
-// Keep only valid pins
-savedPins = savedPins.filter(pin =>
-  pin &&
-  Number.isFinite(pin.lat) &&
-  Number.isFinite(pin.lng) &&
-  Math.abs(pin.lat) <= 90 &&
-  Math.abs(pin.lng) <= 180
-);
-
-
-// ------------------------------------
-// 3. MAP LAYERS
-// ------------------------------------
+// 2. MAP PANES
+// ==========================================
 
 map.createPane("fogPane");
 map.getPane("fogPane").style.zIndex = 450;
@@ -94,312 +41,321 @@ map.createPane("memoryPane");
 map.getPane("memoryPane").style.zIndex = 460;
 
 
-// Route line
-const routeLine = L.polyline(routeCoordinates, {
-  color: "#333333",
-  weight: 2,
-  opacity: 0.35,
+// 3. DATA
+// ==========================================
+
+let routeCoordinates = [];
+let pins = [];
+
+let tracking = false;
+let watchId = null;
+let addingPin = false;
+
+let currentPositionMarker = null;
+
+const ROUTE_STORAGE_KEY = "invisibleMapRoute";
+const PINS_STORAGE_KEY = "invisibleMapPins";
+
+
+// 4. LAYERS
+// ==========================================
+
+const routeLayer = L.layerGroup({
   pane: "memoryPane"
 }).addTo(map);
 
+const pinLayer = L.layerGroup({
+  pane: "memoryPane"
+}).addTo(map);
 
-// Memory circles
-const memoryLayer = L.layerGroup().addTo(map);
+const fogLayer = L.geoJSON(null, {
+  pane: "fogPane",
+  style: {
+    fillColor: "#000000",
+    fillOpacity: 0.60,
+    color: "#EAE5DA",
+    opacity: 0,
+    weight: 0,
+    fillRule: "evenodd"
+  }
+}).addTo(map);
 
 
-// Pin layer
-const pinLayer = L.layerGroup().addTo(map);
+// 5. SAVE AND LOAD DATA
+// ==========================================
 
+function saveMapData() {
+  localStorage.setItem(
+    ROUTE_STORAGE_KEY,
+    JSON.stringify(routeCoordinates)
+  );
 
-// Draw saved memory circles
-function drawMemoryCircles() {
-
-  memoryLayer.clearLayers();
-
-  routeCoordinates.forEach(position => {
-
-    L.circle(position, {
-      radius: 20,
-      stroke: false,
-      fillColor: "#222222",
-      fillOpacity: 0.08,
-      pane: "memoryPane"
-    }).addTo(memoryLayer);
-
-  });
-
+  localStorage.setItem(
+    PINS_STORAGE_KEY,
+    JSON.stringify(pins)
+  );
 }
 
 
-// Draw saved pins
-function drawPins() {
+function loadMapData() {
+  const savedRoute = localStorage.getItem(ROUTE_STORAGE_KEY);
+  const savedPins = localStorage.getItem(PINS_STORAGE_KEY);
 
+  if (savedRoute) {
+    try {
+      routeCoordinates = JSON.parse(savedRoute);
+    } catch (error) {
+      console.error("Could not load saved route:", error);
+      routeCoordinates = [];
+    }
+  }
+
+  if (savedPins) {
+    try {
+      pins = JSON.parse(savedPins);
+    } catch (error) {
+      console.error("Could not load saved pins:", error);
+      pins = [];
+    }
+  }
+
+  drawRoute();
+  drawPins();
+  updateFogLayer();
+}
+
+
+// 6. DRAW THE ROUTE
+// ==========================================
+
+function drawRoute() {
+  routeLayer.clearLayers();
+
+  if (routeCoordinates.length < 2) {
+    return;
+  }
+
+  L.polyline(routeCoordinates, {
+    color: "#BD765F",
+    weight: 2.5,
+    opacity: 0.85,
+    lineCap: "round",
+    lineJoin: "round",
+    pane: "memoryPane"
+  }).addTo(routeLayer);
+}
+
+
+// 7. DRAW PINS
+// ==========================================
+
+function drawPins() {
   pinLayer.clearLayers();
 
-  savedPins.forEach(pin => {
-
-    L.marker([pin.lat, pin.lng]).addTo(pinLayer);
-
+  pins.forEach((pin) => {
+    L.circleMarker([pin.lat, pin.lng], {
+      radius: 7,
+      color: "#FFFFFF",
+      weight: 2,
+      fillColor: "#D5AD68",
+      fillOpacity: 1,
+      pane: "memoryPane"
+    }).addTo(pinLayer);
   });
-
 }
 
 
-drawMemoryCircles();
-drawPins();
+// 8. FOG OF WAR
+// ==========================================
 
+// This creates a large fog polygon around the visible map.
+// Areas around your recorded route are cut out of the fog.
+// No SVG texture or filter is used here.
 
-// Restore saved route position
-if (routeCoordinates.length > 1) {
+function updateFogLayer() {
+  fogLayer.clearLayers();
 
-  map.fitBounds(routeLine.getBounds(), {
-    padding: [30, 30]
-  });
+  if (typeof turf === "undefined") {
+    console.error("Turf.js has not loaded.");
+    return;
+  }
 
-} else if (routeCoordinates.length === 1) {
+  const bounds = map.getBounds().pad(1);
 
-  map.setView(routeCoordinates[0], 16);
+  const southWest = bounds.getSouthWest();
+  const northEast = bounds.getNorthEast();
 
+  const outerFog = turf.polygon([[
+    [southWest.lng, southWest.lat],
+    [northEast.lng, southWest.lat],
+    [northEast.lng, northEast.lat],
+    [southWest.lng, northEast.lat],
+    [southWest.lng, southWest.lat]
+  ]]);
+
+  // If there is no recorded route,
+  // simply display the full fog polygon.
+
+  if (routeCoordinates.length < 2) {
+    fogLayer.addData(outerFog);
+    return;
+  }
+
+  // Turf expects coordinates in [longitude, latitude] order.
+
+  const routeForTurf = turf.lineString(
+    routeCoordinates.map((point) => [
+      point[1],
+      point[0]
+    ])
+  );
+
+  // Create a 65 metre buffer around the route.
+
+  const revealedArea = turf.buffer(
+    routeForTurf,
+    65,
+    {
+      units: "meters"
+    }
+  );
+
+  // Cut the revealed area out of the fog.
+
+  try {
+    const remainingFog = turf.difference(
+      turf.featureCollection([
+        outerFog,
+        revealedArea
+      ])
+    );
+
+    if (remainingFog) {
+      fogLayer.addData(remainingFog);
+    }
+
+  } catch (error) {
+    console.error("Could not update fog:", error);
+
+    // If the difference calculation fails,
+    // show the original fog instead.
+
+    fogLayer.addData(outerFog);
+  }
 }
 
 
-// ------------------------------------
-// 4. ADD PIN FUNCTIONALITY
-// ------------------------------------
+// Update the fog when the map moves or zooms.
 
-let addingPin = false;
+map.on("moveend zoomend", updateFogLayer);
+
+
+// 9. ADD PINS
+// ==========================================
 
 const addPinButton = document.getElementById("addPinButton");
 
-L.DomEvent.disableClickPropagation(addPinButton);
+if (addPinButton) {
+  addPinButton.addEventListener("click", () => {
+    addingPin = !addingPin;
 
-addPinButton.addEventListener("click", () => {
+    addPinButton.classList.toggle("active", addingPin);
 
-  addingPin = !addingPin;
+    if (addingPin) {
+      addPinButton.textContent = "Click map to add pin";
+    } else {
+      addPinButton.textContent = "+";
+    }
+  });
+}
 
-  if (addingPin) {
-    addPinButton.textContent = "×";
-    addPinButton.title = "Cancel adding a pin";
-  } else {
-    addPinButton.textContent = "+";
-    addPinButton.title = "Add a pin";
+
+map.on("click", (event) => {
+  if (!addingPin) {
+    return;
   }
-
-});
-
-
-map.on("click", event => {
-
-  if (!addingPin) return;
 
   const newPin = {
     lat: event.latlng.lat,
     lng: event.latlng.lng
   };
 
-  // Add pin to saved data
-  savedPins.push(newPin);
+  pins.push(newPin);
 
-  // Draw the pin
-  L.marker(event.latlng).addTo(pinLayer);
-
-  // Save everything
   saveMapData();
+  drawPins();
 
-  // Exit pin mode
   addingPin = false;
-  addPinButton.textContent = "+";
-  addPinButton.title = "Add a pin";
 
+  if (addPinButton) {
+    addPinButton.classList.remove("active");
+    addPinButton.textContent = "+";
+  }
 });
 
 
-// ------------------------------------
-// 5. FOG / REVEAL EFFECT
-// ------------------------------------
-
-let fogLayer = null;
-
-
-function updateFogLayer() {
-
-  if (fogLayer !== null) {
-    map.removeLayer(fogLayer);
-  }
-
-  const bounds = map.getBounds().pad(0.5);
-
-  const southWest = bounds.getSouthWest();
-  const northEast = bounds.getNorthEast();
-
-  const outerRing = [
-    [southWest.lat, southWest.lng],
-    [southWest.lat, northEast.lng],
-    [northEast.lat, northEast.lng],
-    [northEast.lat, southWest.lng],
-    [southWest.lat, southWest.lng]
-  ];
-
-  const holes = [];
-
-  if (routeCoordinates.length > 0) {
-
-    let routeFeature;
-
-    if (routeCoordinates.length === 1) {
-
-      const position = routeCoordinates[0];
-
-      routeFeature = turf.point([
-        position[1],
-        position[0]
-      ]);
-
-    } else {
-
-      const coordinates = routeCoordinates.map(position => [
-        position[1],
-        position[0]
-      ]);
-
-      routeFeature = turf.lineString(coordinates);
-
-    }
-
-    const revealedArea = turf.buffer(
-      routeFeature,
-      65,
-      { units: "meters" }
-    );
-
-    if (revealedArea.geometry.type === "Polygon") {
-
-      holes.push(
-        revealedArea.geometry.coordinates[0].map(point => [
-          point[1],
-          point[0]
-        ])
-      );
-
-    } else if (revealedArea.geometry.type === "MultiPolygon") {
-
-      revealedArea.geometry.coordinates.forEach(polygon => {
-
-        holes.push(
-          polygon[0].map(point => [
-            point[1],
-            point[0]
-          ])
-        );
-
-      });
-
-    }
-
-  }
-
-  fogLayer = L.polygon(
-    [outerRing, ...holes],
-    {
-      stroke: false,
-      fillColor: "#f4f1eb",
-      fillOpacity: 0.72,
-      fillRule: "evenodd",
-      interactive: false,
-      pane: "fogPane"
-    }
-  ).addTo(map);
-
-}
-
-
-updateFogLayer();
-
-map.on("moveend zoomend", updateFogLayer);
-
-
-// ------------------------------------
-// 6. GPS TRACKING
-// ------------------------------------
+// 10. GPS TRACKING
+// ==========================================
 
 const trackingButton = document.getElementById("trackingButton");
 const trackingStatus = document.getElementById("trackingStatus");
 
-let tracking = false;
-let watchId = null;
-let currentLocationMarker = null;
 
-
-trackingButton.addEventListener("click", () => {
-
-  if (tracking) {
-    stopTracking();
-  } else {
-    startTracking();
+function updateTrackingStatus(message) {
+  if (trackingStatus) {
+    trackingStatus.textContent = message;
   }
-
-});
+}
 
 
 function startTracking() {
-
   if (!navigator.geolocation) {
-
-    trackingStatus.textContent =
-      "GPS is not supported by this browser";
-
+    updateTrackingStatus("GPS not supported");
     return;
-
   }
 
   tracking = true;
 
-  trackingButton.textContent = "Stop tracking";
-  trackingStatus.textContent = "Waiting for GPS...";
+  if (trackingButton) {
+    trackingButton.textContent = "Stop tracking";
+    trackingButton.classList.add("active");
+  }
+
+  updateTrackingStatus("Waiting for GPS...");
 
   watchId = navigator.geolocation.watchPosition(
-
-    position => {
-
+    (position) => {
       const latitude = position.coords.latitude;
       const longitude = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
+      // Ignore very inaccurate GPS readings.
+
       if (accuracy > 1000) {
-
-        trackingStatus.textContent =
-          "Location accuracy too low: " +
-          Math.round(accuracy) + " metres";
-
+        updateTrackingStatus("GPS signal inaccurate");
         return;
-
       }
 
       const newPosition = [latitude, longitude];
 
-      map.setView(newPosition, 16);
+      // Update the current location marker.
 
-      // Create or update location marker
-      if (currentLocationMarker === null) {
-
-        currentLocationMarker = L.circleMarker(newPosition, {
-          radius: 8,
-          color: "#ffffff",
-          weight: 3,
-          fillColor: "#000000",
-          fillOpacity: 1
-        }).addTo(map);
-
+      if (currentPositionMarker) {
+        currentPositionMarker.setLatLng(newPosition);
       } else {
-
-        currentLocationMarker.setLatLng(newPosition);
-
+        currentPositionMarker = L.circleMarker(newPosition, {
+          radius: 8,
+          color: "#FFFFFF",
+          weight: 3,
+          fillColor: "#718F82",
+          fillOpacity: 1,
+          pane: "memoryPane"
+        }).addTo(map);
       }
 
+      // Only record movement when it is at least 5 metres.
 
-      // Ignore movements smaller than 5 metres
       if (routeCoordinates.length > 0) {
-
         const lastPosition =
           routeCoordinates[routeCoordinates.length - 1];
 
@@ -409,266 +365,173 @@ function startTracking() {
         );
 
         if (distance < 5) {
-
-          trackingStatus.textContent = "GPS tracking active";
           return;
-
         }
-
       }
 
+      // Add the new position to the route.
 
-      // Add new GPS position
       routeCoordinates.push(newPosition);
 
-      routeLine.setLatLngs(routeCoordinates);
-
-
-      // Add memory circle
-      L.circle(newPosition, {
-        radius: 20,
-        stroke: false,
-        fillColor: "#222222",
-        fillOpacity: 0.08,
-        pane: "memoryPane"
-      }).addTo(memoryLayer);
-
-
-      // Update reveal effect
+      drawRoute();
       updateFogLayer();
-
-
-      // Save route and pins
       saveMapData();
 
-      trackingStatus.textContent = "GPS tracking active";
+      map.setView(newPosition, 16);
 
+      updateTrackingStatus("Tracking your movement");
     },
 
+    (error) => {
+      console.error("GPS error:", error);
 
-    error => {
+      updateTrackingStatus("GPS error: " + error.message);
 
-      if (error.code === 1) {
-
-        trackingStatus.textContent =
-          "Location permission denied";
-
-        stopTracking();
-
-      } else if (error.code === 2) {
-
-        trackingStatus.textContent =
-          "GPS position unavailable";
-
-      } else if (error.code === 3) {
-
-        trackingStatus.textContent =
-          "GPS request timed out. Still trying...";
-
-      }
-
+      stopTracking();
     },
-
 
     {
       enableHighAccuracy: true,
       maximumAge: 5000,
-      timeout: 10000
+      timeout: 20000
     }
-
   );
-
 }
 
-
-// ------------------------------------
-// 7. STOP GPS TRACKING
-// ------------------------------------
 
 function stopTracking() {
-
-  if (watchId !== null) {
-
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
-
-  }
-
   tracking = false;
 
-  trackingButton.textContent = "Start tracking";
-  trackingStatus.textContent = "Tracking is off";
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
 
+  if (trackingButton) {
+    trackingButton.textContent = "Start tracking";
+    trackingButton.classList.remove("active");
+  }
+
+  updateTrackingStatus("Tracking stopped");
 }
 
 
-// ------------------------------------
-// 8. EXPORT MAP DATA
-// ------------------------------------
+if (trackingButton) {
+  trackingButton.addEventListener("click", () => {
+    if (tracking) {
+      stopTracking();
+    } else {
+      startTracking();
+    }
+  });
+}
 
-const exportButton = document.getElementById("exportButton");
 
-exportButton.addEventListener("click", () => {
+// 11. EXPORT MAP DATA
+// ==========================================
 
-  const backup = {
-    app: "The Invisible Map",
-    version: 1,
-    exportedAt: new Date().toISOString(),
+function exportMapData() {
+  const data = {
     route: routeCoordinates,
-    pins: savedPins
+    pins: pins
   };
 
   const file = new Blob(
-    [JSON.stringify(backup, null, 2)],
-    { type: "application/json" }
+    [JSON.stringify(data, null, 2)],
+    {
+      type: "application/json"
+    }
   );
 
-  const fileURL = URL.createObjectURL(file);
+  const url = URL.createObjectURL(file);
 
-  const downloadLink = document.createElement("a");
+  const link = document.createElement("a");
 
-  downloadLink.href = fileURL;
-  downloadLink.download = "invisible-map-backup.json";
+  link.href = url;
+  link.download = "invisible-map-data.json";
 
-  document.body.appendChild(downloadLink);
-  downloadLink.click();
-  document.body.removeChild(downloadLink);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 
-  setTimeout(() => {
-    URL.revokeObjectURL(fileURL);
-  }, 1000);
-
-});
+  URL.revokeObjectURL(url);
+}
 
 
-// ------------------------------------
-// 9. IMPORT MAP DATA
-// ------------------------------------
+const exportButton = document.getElementById("exportButton");
+
+if (exportButton) {
+  exportButton.addEventListener("click", exportMapData);
+}
+
+
+// 12. IMPORT MAP DATA
+// ==========================================
 
 const importButton = document.getElementById("importButton");
 const importFile = document.getElementById("importFile");
 
-importButton.addEventListener("click", () => {
 
-  importFile.click();
+if (importButton && importFile) {
+  importButton.addEventListener("click", () => {
+    importFile.click();
+  });
 
-});
+  importFile.addEventListener("change", (event) => {
+    const file = event.target.files[0];
 
-
-importFile.addEventListener("change", event => {
-
-  const file = event.target.files[0];
-
-  if (!file) return;
-
-  const reader = new FileReader();
-
-  reader.onload = () => {
-
-    try {
-
-      const backup = JSON.parse(reader.result);
-
-      // Check the backup structure
-      if (
-        backup.app !== "The Invisible Map" ||
-        !Array.isArray(backup.route) ||
-        !Array.isArray(backup.pins)
-      ) {
-
-        alert("This file is not a valid Invisible Map backup.");
-        return;
-
-      }
-
-      // Validate imported route
-      const validRoute = backup.route.every(position =>
-        Array.isArray(position) &&
-        position.length === 2 &&
-        Number.isFinite(position[0]) &&
-        Number.isFinite(position[1]) &&
-        Math.abs(position[0]) <= 90 &&
-        Math.abs(position[1]) <= 180
-      );
-
-      // Validate imported pins
-      const validPins = backup.pins.every(pin =>
-        pin &&
-        Number.isFinite(pin.lat) &&
-        Number.isFinite(pin.lng) &&
-        Math.abs(pin.lat) <= 90 &&
-        Math.abs(pin.lng) <= 180
-      );
-
-      if (!validRoute || !validPins) {
-
-        alert("The backup contains invalid map data.");
-        return;
-
-      }
-
-      const confirmed = confirm(
-        "Import this backup? Your current route and pins on this device will be replaced."
-      );
-
-      if (!confirmed) return;
-
-
-      // Replace current data
-      routeCoordinates = backup.route;
-      savedPins = backup.pins;
-
-
-      // Redraw map layers
-      routeLine.setLatLngs(routeCoordinates);
-
-      drawMemoryCircles();
-      drawPins();
-
-      // Update saved data
-      saveMapData();
-
-      // Update the reveal effect
-      updateFogLayer();
-
-
-      // Adjust map view
-      if (routeCoordinates.length > 1) {
-
-        map.fitBounds(routeLine.getBounds(), {
-          padding: [30, 30]
-        });
-
-      } else if (routeCoordinates.length === 1) {
-
-        map.setView(routeCoordinates[0], 16);
-
-      } else if (savedPins.length > 0) {
-
-        map.setView(
-          [savedPins[0].lat, savedPins[0].lng],
-          16
-        );
-
-      }
-
-      alert("Your map backup was imported successfully!");
-
-    } catch (error) {
-
-      alert("Could not read this backup file.");
-
-      console.error(error);
-
-    } finally {
-
-      // Allow selecting the same file again
-      importFile.value = "";
-
+    if (!file) {
+      return;
     }
 
-  };
+    const reader = new FileReader();
 
-  reader.readAsText(file);
+    reader.onload = (loadEvent) => {
+      try {
+        const importedData = JSON.parse(loadEvent.target.result);
 
-});
+        if (
+          !Array.isArray(importedData.route) ||
+          !Array.isArray(importedData.pins)
+        ) {
+          throw new Error("Invalid map data");
+        }
+
+        const confirmed = confirm(
+          "Importing this file will replace the map data currently saved on this device. Continue?"
+        );
+
+        if (!confirmed) {
+          return;
+        }
+
+        routeCoordinates = importedData.route;
+        pins = importedData.pins;
+
+        saveMapData();
+
+        drawRoute();
+        drawPins();
+        updateFogLayer();
+
+        alert("Map data imported successfully!");
+
+      } catch (error) {
+        console.error("Import error:", error);
+        alert("Could not import this file. Please check that it is a valid map backup.");
+      }
+
+      importFile.value = "";
+    };
+
+    reader.readAsText(file);
+  });
+}
+
+
+// 13. INITIALISE
+// ==========================================
+
+loadMapData();
+
+console.log("The Invisible Map is ready!");

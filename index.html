@@ -6,7 +6,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>Invisible Map</title>
+  <title>The Invisible Map</title>
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Leaflet CSS -->
   <link
@@ -14,23 +19,26 @@
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   >
 
-  <!-- My CSS -->
   <link rel="stylesheet" href="style.css">
-
 </head>
 
 <body>
 
   <div id="map"></div>
 
-
-  <!-- GPS tracking button -->
   <button id="trackingButton" class="tracking-button">
     Start tracking
   </button>
 
+  <button
+    id="locationButton"
+    class="location-button"
+    aria-label="Go to my current location"
+    title="Go to my current location"
+  >
+    ⌖
+  </button>
 
-  <!-- Add a pin button -->
   <button
     id="addPinButton"
     class="add-pin-button"
@@ -40,14 +48,10 @@
     +
   </button>
 
-
-  <!-- Tracking status -->
   <div id="trackingStatus" class="tracking-status">
     Tracking is off
   </div>
 
-
-  <!-- Data management buttons -->
   <div class="data-controls">
 
     <button id="exportButton" class="data-button">
@@ -68,15 +72,113 @@
   </div>
 
 
-  <!-- Leaflet JavaScript -->
+  <!-- PIN EDITOR MODAL -->
+
+  <div id="pinModal" class="modal-overlay is-hidden">
+
+    <div class="pin-modal">
+
+      <div class="modal-header">
+        <h2 id="pinModalTitle">New memory</h2>
+
+        <button
+          type="button"
+          id="closePinModal"
+          class="modal-close"
+          aria-label="Close"
+        >
+          &times;
+        </button>
+      </div>
+
+      <form id="pinForm">
+
+        <label for="pinTitle">Place name</label>
+        <input
+          type="text"
+          id="pinTitle"
+          placeholder="Give this place a name..."
+          maxlength="60"
+        >
+
+        <label for="pinNote">Your memory</label>
+        <textarea
+          id="pinNote"
+          rows="4"
+          placeholder="What happened here? What do you remember?"
+        ></textarea>
+
+        <label for="pinFeeling">How did it feel?</label>
+        <input
+          type="text"
+          id="pinFeeling"
+          placeholder="e.g. peaceful, exciting, nostalgic..."
+          maxlength="80"
+        >
+
+        <div class="pin-location">
+          <span id="pinLocationStatus">
+            No location selected yet
+          </span>
+
+          <button
+            type="button"
+            id="choosePinLocation"
+            class="location-select-button"
+          >
+            Choose on map
+          </button>
+        </div>
+
+        <div class="modal-actions">
+
+          <button
+            type="button"
+            id="deletePinButton"
+            class="delete-pin-button"
+            hidden
+          >
+            Delete
+          </button>
+
+          <div class="modal-actions-right">
+
+            <button
+              type="button"
+              id="cancelPinButton"
+              class="cancel-pin-button"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              id="savePinButton"
+              class="save-pin-button"
+              disabled
+            >
+              Save memory
+            </button>
+
+          </div>
+
+        </div>
+
+      </form>
+
+    </div>
+
+  </div>
+
+
+  <!-- Leaflet -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <!-- Turf.js -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
 
-  <!-- My JavaScript -->
+  <!-- Main JavaScript -->
   <script src="script.js"></script>
 
 </body>
-
 </html>

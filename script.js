@@ -9,11 +9,15 @@
    1. MAP SETUP
 ------------------------------------------ */
 
-// Replace with your new restricted MapTiler key.
+// Insert your NEW restricted MapTiler key here.
 const maptilerKey = "2E4wY5kv31hlD5duk20H";
 
 const map = L.map("map", {
-  zoomControl: false
+  zoomControl: false,
+
+  // Render Leaflet paths using Canvas instead of SVG.
+  // This helps when the map contains many route lines.
+  preferCanvas: true
 }).setView([51.5074, -0.1278], 13);
 
 
@@ -24,13 +28,19 @@ L.tileLayer(
     tileSize: 512,
     zoomOffset: -1,
     minZoom: 1,
+
+    // Improve tile loading behaviour during zooming.
+    updateWhenZooming: false,
+    updateWhenIdle: true,
+    keepBuffer: 2,
+
     attribution:
       '&copy; <a href="https://www.maptiler.com/">MapTiler</a> &copy; OpenStreetMap contributors'
   }
 ).addTo(map);
 
 
-// Zoom controls at the top right.
+// Zoom controls.
 L.control.zoom({
   position: "topright"
 }).addTo(map);
@@ -42,6 +52,9 @@ L.control.zoom({
 
 map.createPane("fogPane");
 map.getPane("fogPane").style.zIndex = 450;
+
+map.createPane("contourPane");
+map.getPane("contourPane").style.zIndex = 455;
 
 map.createPane("memoryPane");
 map.getPane("memoryPane").style.zIndex = 460;
@@ -79,34 +92,179 @@ const pinLayer = L.layerGroup({
   pane: "memoryPane"
 }).addTo(map);
 
-const fogLayer = L.geoJSON(null, {
-  pane: "fogPane",
-  style: {
-    fillColor: "#FFFFFF",
-    fillOpacity: 0.88,
-    color: "#FFFFFF",
-    opacity: 0,
-    weight: 0,
-    fillRule: "evenodd"
-  }
+
+// Canvas used for the cloudy fog.
+const fogCanvas = document.createElement("canvas");
+
+fogCanvas.style.position = "absolute";
+fogCanvas.style.top = "0";
+fogCanvas.style.left = "0";
+fogCanvas.style.pointerEvents = "none";
+
+// Hint to the browser that this canvas will be transformed.
+fogCanvas.style.willChange = "transform";
+
+const fogContext = fogCanvas.getContext("2d", {
+  alpha: true
+});
+
+map.getPane("fogPane").appendChild(fogCanvas);
+
+
+// Contour lines.
+const contourLayer = L.layerGroup({
+  pane: "contourPane"
 }).addTo(map);
 
 
 /* ------------------------------------------
-   5. SAVE AND LOAD DATA
+   5. CONTOUR LINES
+------------------------------------------ */
+
+function drawContourLines() {
+
+  contourLayer.clearLayers();
+
+  if (
+    typeof turf === "undefined" ||
+    routeSegments.length === 0
+  ) {
+    return;
+  }
+
+  const contourLevels = [
+    {
+      distance: 18,
+      color: "#B0B0B0",
+      opacity: 0.9,
+      weight: 1.0
+    },
+    {
+      distance: 28,
+      color: "#999999",
+      opacity: 0.8,
+      weight: 1.0
+    },
+    {
+      distance: 40,
+      color: "#858585",
+      opacity: 0.7,
+      weight: 1.0
+    }
+  ];
+
+  contourLevels.forEach(level => {
+
+    const buffers = [];
+
+    routeSegments.forEach(segment => {
+
+      if (!Array.isArray(segment) || segment.length < 2) {
+        return;
+      }
+
+      try {
+
+        const routeLine = turf.lineString(
+          segment.map(point => [point[1], point[0]])
+        );
+
+        const buffer = turf.buffer(
+          routeLine,
+          level.distance,
+          {
+            units: "meters",
+            steps: 24
+          }
+        );
+
+        if (buffer) {
+          buffers.push(buffer);
+        }
+
+      } catch (error) {
+        console.warn("Could not create a contour buffer:", error);
+      }
+
+    });
+
+    if (buffers.length === 0) {
+      return;
+    }
+
+    let mergedContours;
+
+    try {
+
+      if (buffers.length === 1) {
+        mergedContours = buffers[0];
+      } else {
+        mergedContours = turf.union(
+          turf.featureCollection(buffers)
+        );
+      }
+
+    } catch (error) {
+
+      console.warn("Could not merge contour lines:", error);
+      mergedContours = null;
+
+    }
+
+    const contourStyle = {
+      pane: "contourPane",
+      style: {
+        color: level.color,
+        opacity: level.opacity,
+        weight: level.weight,
+        fill: false,
+        interactive: false,
+        lineCap: "round",
+        lineJoin: "round"
+      },
+      interactive: false
+    };
+
+    if (mergedContours) {
+
+      L.geoJSON(mergedContours, contourStyle).addTo(contourLayer);
+
+    } else {
+
+      buffers.forEach(buffer => {
+        L.geoJSON(buffer, contourStyle).addTo(contourLayer);
+      });
+
+    }
+
+  });
+
+}
+
+
+/* ------------------------------------------
+   6. SAVE AND LOAD DATA
 ------------------------------------------ */
 
 function saveMapData() {
 
-  localStorage.setItem(
-    ROUTE_STORAGE_KEY,
-    JSON.stringify(routeSegments)
-  );
+  try {
 
-  localStorage.setItem(
-    PINS_STORAGE_KEY,
-    JSON.stringify(pins)
-  );
+    localStorage.setItem(
+      ROUTE_STORAGE_KEY,
+      JSON.stringify(routeSegments)
+    );
+
+    localStorage.setItem(
+      PINS_STORAGE_KEY,
+      JSON.stringify(pins)
+    );
+
+  } catch (error) {
+
+    console.error("Could not save map data:", error);
+
+  }
 
 }
 
@@ -118,9 +276,6 @@ function loadMapData() {
 
   const savedPins =
     localStorage.getItem(PINS_STORAGE_KEY);
-
-
-  // Load segmented route format.
 
   if (savedRouteSegments) {
 
@@ -140,8 +295,6 @@ function loadMapData() {
     }
 
   } else {
-
-    // Support older route format.
 
     const oldRoute =
       localStorage.getItem(OLD_ROUTE_STORAGE_KEY);
@@ -170,9 +323,6 @@ function loadMapData() {
 
   }
 
-
-  // Load pins.
-
   if (savedPins) {
 
     try {
@@ -196,13 +346,16 @@ function loadMapData() {
 
   }
 
-
   routeSegments = routeSegments.filter(
     segment => Array.isArray(segment)
   );
 
   drawRoute();
   drawPins();
+
+  // Contours only need to be recalculated when route data changes.
+  drawContourLines();
+
   updateFogLayer();
 
   saveMapData();
@@ -211,10 +364,8 @@ function loadMapData() {
 
 
 /* ------------------------------------------
-   6. DRAW THE ROUTES
+   7. DRAW THE ROUTES
 ------------------------------------------ */
-
-// Create evenly spaced samples from each route.
 
 function getRouteSamples(segment, spacing = 15) {
 
@@ -251,17 +402,11 @@ function getRouteSamples(segment, spacing = 15) {
 
   }
 
-
-  // Always include the final GPS point.
-
   const lastPoint = segment[segment.length - 1];
 
   if (
     samples.length === 0 ||
-    map.distance(
-      samples[samples.length - 1],
-      lastPoint
-    ) > 2
+    map.distance(samples[samples.length - 1], lastPoint) > 2
   ) {
     samples.push(lastPoint);
   }
@@ -271,8 +416,6 @@ function getRouteSamples(segment, spacing = 15) {
 }
 
 
-// Count how many different sessions passed nearby.
-
 function countNearbyVisits(
   point,
   currentSegmentIndex,
@@ -281,63 +424,51 @@ function countNearbyVisits(
 
   let visitCount = 1;
 
-  sampledSegments.forEach(
-    (otherSamples, otherSegmentIndex) => {
+  sampledSegments.forEach((otherSamples, otherSegmentIndex) => {
 
-      if (otherSegmentIndex === currentSegmentIndex) {
-        return;
-      }
-
-      const hasNearbyPoint = otherSamples.some(otherPoint => {
-
-        return map.distance(point, otherPoint) <= 25;
-
-      });
-
-      if (hasNearbyPoint) {
-        visitCount++;
-      }
-
+    if (otherSegmentIndex === currentSegmentIndex) {
+      return;
     }
-  );
+
+    const hasNearbyPoint = otherSamples.some(otherPoint => {
+      return map.distance(point, otherPoint) <= 25;
+    });
+
+    if (hasNearbyPoint) {
+      visitCount++;
+    }
+
+  });
 
   return visitCount;
 
 }
 
 
-// More frequently visited paths become darker.
-
 function getRouteStyle(visitCount) {
 
   if (visitCount === 1) {
-
     return {
       color: "#888888",
       weight: 2,
       opacity: 0.58
     };
-
   }
 
   if (visitCount === 2) {
-
     return {
       color: "#555555",
       weight: 2.7,
       opacity: 0.78
     };
-
   }
 
   if (visitCount === 3) {
-
     return {
       color: "#333333",
       weight: 3.3,
       opacity: 0.9
     };
-
   }
 
   return {
@@ -357,7 +488,6 @@ function drawRoute() {
     return getRouteSamples(segment);
   });
 
-
   routeSegments.forEach((segment, segmentIndex) => {
 
     if (segment.length < 2) {
@@ -373,7 +503,6 @@ function drawRoute() {
     let currentVisitCount = null;
     let currentLine = [];
 
-
     function addCurrentLine() {
 
       if (
@@ -385,9 +514,7 @@ function drawRoute() {
 
       const style = getRouteStyle(currentVisitCount);
 
-
-      // Layer 1: Wide ink halo.
-
+      // Wide ink halo.
       L.polyline(currentLine, {
         color: style.color,
         weight: style.weight * 4,
@@ -397,9 +524,7 @@ function drawRoute() {
         pane: "memoryPane"
       }).addTo(routeLayer);
 
-
-      // Layer 2: Middle pigment.
-
+      // Middle pigment.
       L.polyline(currentLine, {
         color: style.color,
         weight: style.weight * 2,
@@ -409,9 +534,7 @@ function drawRoute() {
         pane: "memoryPane"
       }).addTo(routeLayer);
 
-
-      // Layer 3: Central ink line.
-
+      // Central ink line.
       L.polyline(currentLine, {
         color: style.color,
         weight: style.weight,
@@ -422,7 +545,6 @@ function drawRoute() {
       }).addTo(routeLayer);
 
     }
-
 
     samples.forEach(point => {
 
@@ -444,7 +566,6 @@ function drawRoute() {
       } else {
 
         currentLine.push(point);
-
         addCurrentLine();
 
         currentVisitCount = visitCount;
@@ -462,7 +583,7 @@ function drawRoute() {
 
 
 /* ------------------------------------------
-   7. DRAW PINS
+   8. DRAW PINS
 ------------------------------------------ */
 
 function drawPins() {
@@ -483,9 +604,6 @@ function drawPins() {
       }
     ).addTo(pinLayer);
 
-
-    // Clicking a pin opens its editor.
-
     marker.on("click", () => {
       openPinEditor(index);
     });
@@ -496,262 +614,321 @@ function drawPins() {
 
 
 /* ------------------------------------------
-   8. FOG OF WAR + ORGANIC EDGES
+   9. CLOUD TEXTURE
 ------------------------------------------ */
 
-function updateFogLayer() {
+// Generate a soft noise texture for the fog.
 
-  fogLayer.clearLayers();
+function createCloudTexture(width, height, scale = 12) {
 
-  if (typeof turf === "undefined") {
+  const texture = document.createElement("canvas");
 
-    console.error("Turf.js has not loaded.");
-    return;
+  texture.width = Math.max(1, Math.ceil(width / scale));
+  texture.height = Math.max(1, Math.ceil(height / scale));
 
-  }
+  const context = texture.getContext("2d");
 
+  const imageData = context.createImageData(
+    texture.width,
+    texture.height
+  );
 
-  const bounds = map.getBounds().pad(1);
+  for (let i = 0; i < imageData.data.length; i += 4) {
 
-  const southWest = bounds.getSouthWest();
-  const northEast = bounds.getNorthEast();
+    const value = 65 + Math.random() * 190;
 
-
-  const outerFog = turf.polygon([[
-    [southWest.lng, southWest.lat],
-    [northEast.lng, southWest.lat],
-    [northEast.lng, northEast.lat],
-    [southWest.lng, northEast.lat],
-    [southWest.lng, southWest.lat]
-  ]]);
-
-
-  const organicShapes = [];
-
-
-  // Repeatable random-looking values.
-
-  function seededVariation(index) {
-
-    const value =
-      Math.sin(index * 127.1 + 19.7) * 43758.5453;
-
-    return value - Math.floor(value);
+    imageData.data[i] = value;
+    imageData.data[i + 1] = value;
+    imageData.data[i + 2] = value;
+    imageData.data[i + 3] = 255;
 
   }
 
+  context.putImageData(imageData, 0, 0);
 
-  // Process every route segment.
-
-  routeSegments.forEach((segment, segmentIndex) => {
-
-    if (segment.length < 2) {
-      return;
-    }
-
-    const routeForTurf = turf.lineString(
-      segment.map(point => [
-        point[1],
-        point[0]
-      ])
-    );
-
-    const routeLength = turf.length(
-      routeForTurf,
-      { units: "meters" }
-    );
-
-
-    // Original 65 metre corridor.
-
-    const revealedArea = turf.buffer(
-      routeForTurf,
-      65,
-      {
-        units: "meters"
-      }
-    );
-
-    organicShapes.push(revealedArea);
-
-
-    // Organic edge experiment.
-
-    const spacing = 150;
-
-    const sampleCount = Math.min(
-      60,
-      Math.floor(routeLength / spacing)
-    );
-
-
-    for (let i = 1; i <= sampleCount; i++) {
-
-      const distanceAlongRoute =
-        (routeLength * i) / (sampleCount + 1);
-
-      const point = turf.along(
-        routeForTurf,
-        distanceAlongRoute,
-        { units: "meters" }
-      );
-
-      const before = turf.along(
-        routeForTurf,
-        Math.max(0, distanceAlongRoute - 10),
-        { units: "meters" }
-      );
-
-      const after = turf.along(
-        routeForTurf,
-        Math.min(routeLength, distanceAlongRoute + 10),
-        { units: "meters" }
-      );
-
-      const direction = turf.bearing(before, after);
-
-      const side = i % 2 === 0 ? 90 : -90;
-
-      const variationIndex =
-        segmentIndex * 10000 + i;
-
-      const offset =
-        25 + seededVariation(variationIndex) * 30;
-
-      const radius =
-        24 + seededVariation(variationIndex + 1000) * 22;
-
-      const bumpCenter = turf.destination(
-        point,
-        offset,
-        direction + side,
-        { units: "meters" }
-      );
-
-      const bump = turf.circle(
-        bumpCenter,
-        radius,
-        {
-          units: "meters",
-          steps: 12
-        }
-      );
-
-      organicShapes.push(bump);
-
-    }
-
-  });
-
-
-  // No routes: display full fog.
-
-  if (organicShapes.length === 0) {
-
-    fogLayer.addData(outerFog);
-    return;
-
-  }
-
-
-  // Merge all revealed areas.
-
-  let finalReveal;
-
-  try {
-
-    finalReveal = turf.union(
-      turf.featureCollection(organicShapes)
-    );
-
-  } catch (error) {
-
-    console.warn(
-      "Could not merge organic shapes:",
-      error
-    );
-
-
-    // Fallback: use basic route buffers.
-
-    const basicBuffers = [];
-
-    routeSegments.forEach(segment => {
-
-      if (segment.length < 2) {
-        return;
-      }
-
-      const line = turf.lineString(
-        segment.map(point => [
-          point[1],
-          point[0]
-        ])
-      );
-
-      basicBuffers.push(
-        turf.buffer(line, 65, {
-          units: "meters"
-        })
-      );
-
-    });
-
-
-    try {
-
-      finalReveal = turf.union(
-        turf.featureCollection(basicBuffers)
-      );
-
-    } catch (fallbackError) {
-
-      console.error(
-        "Could not create reveal area:",
-        fallbackError
-      );
-
-      fogLayer.addData(outerFog);
-      return;
-
-    }
-
-  }
-
-
-  // Cut revealed areas out of the fog.
-
-  try {
-
-    const remainingFog = turf.difference(
-      turf.featureCollection([
-        outerFog,
-        finalReveal
-      ])
-    );
-
-    if (remainingFog) {
-      fogLayer.addData(remainingFog);
-    }
-
-  } catch (error) {
-
-    console.error("Could not update fog:", error);
-
-    fogLayer.addData(outerFog);
-
-  }
+  return texture;
 
 }
 
 
-// Update fog when map moves or zooms.
+// Cache cloud textures instead of generating new ones
+// every time the map is moved or zoomed.
 
-map.on("moveend zoomend", updateFogLayer);
+let cachedLargeClouds = null;
+let cachedSmallClouds = null;
+
+let cachedTextureWidth = 0;
+let cachedTextureHeight = 0;
+
+
+function getCloudTextures(width, height) {
+
+  if (
+    !cachedLargeClouds ||
+    width !== cachedTextureWidth ||
+    height !== cachedTextureHeight
+  ) {
+
+    cachedTextureWidth = width;
+    cachedTextureHeight = height;
+
+    cachedLargeClouds = createCloudTexture(
+      width,
+      height,
+      18
+    );
+
+    cachedSmallClouds = createCloudTexture(
+      width,
+      height,
+      7
+    );
+
+  }
+
+  return {
+    large: cachedLargeClouds,
+    small: cachedSmallClouds
+  };
+
+}
 
 
 /* ------------------------------------------
-   9. ADD, EDIT AND DELETE PINS
+   10. CLOUDY FOG OF WAR
+------------------------------------------ */
+
+function updateFogLayer() {
+
+  const size = map.getSize();
+
+  const width = size.x;
+  const height = size.y;
+
+  // Limit pixel density to reduce canvas workload.
+  // This is still sharp enough for the fog effect.
+  const pixelRatio = Math.min(
+    window.devicePixelRatio || 1,
+    1.5
+  );
+
+  const canvasWidth = Math.round(width * pixelRatio);
+  const canvasHeight = Math.round(height * pixelRatio);
+
+  // Only resize the canvas when its dimensions change.
+  // Changing canvas dimensions clears it and resets its context.
+  if (
+    fogCanvas.width !== canvasWidth ||
+    fogCanvas.height !== canvasHeight
+  ) {
+
+    fogCanvas.width = canvasWidth;
+    fogCanvas.height = canvasHeight;
+
+  }
+
+  fogCanvas.style.width = width + "px";
+  fogCanvas.style.height = height + "px";
+
+  const topLeft = map.containerPointToLayerPoint([0, 0]);
+
+  L.DomUtil.setPosition(fogCanvas, topLeft);
+
+  fogContext.setTransform(
+    pixelRatio,
+    0,
+    0,
+    pixelRatio,
+    0,
+    0
+  );
+
+  fogContext.clearRect(0, 0, width, height);
+
+  // ----------------------------------------
+  // 1. BASE FOG
+  // ----------------------------------------
+
+  fogContext.globalCompositeOperation = "source-over";
+
+  fogContext.fillStyle = "rgba(252, 247, 247, 0.84)";
+
+  fogContext.fillRect(0, 0, width, height);
+
+  // ----------------------------------------
+  // 2. CLOUD TEXTURES
+  // ----------------------------------------
+
+  const cloudTextures = getCloudTextures(width, height);
+
+  const largeClouds = cloudTextures.large;
+  const smallClouds = cloudTextures.small;
+
+  // ----------------------------------------
+  // 3. LARGE CLOUD FORMATIONS
+  // ----------------------------------------
+
+  fogContext.save();
+
+  fogContext.globalAlpha = 0.7;
+  fogContext.filter = "blur(15px)";
+
+  fogContext.drawImage(
+    largeClouds,
+    0,
+    0,
+    width,
+    height
+  );
+
+  fogContext.restore();
+
+  // ----------------------------------------
+  // 4. SMALLER CLOUD DETAILS
+  // ----------------------------------------
+
+  fogContext.save();
+
+  fogContext.globalAlpha = 0.5;
+  fogContext.filter = "blur(15px)";
+
+  fogContext.drawImage(
+    smallClouds,
+    0,
+    0,
+    width,
+    height
+  );
+
+  fogContext.restore();
+
+  // ----------------------------------------
+  // 5. REVEAL EXPLORED ROUTES
+  // ----------------------------------------
+
+  fogContext.globalCompositeOperation = "destination-out";
+
+  routeSegments.forEach(segment => {
+
+    if (!Array.isArray(segment) || segment.length < 2) {
+      return;
+    }
+
+    const points = segment.map(point => {
+
+      return map.latLngToContainerPoint([
+        point[0],
+        point[1]
+      ]);
+
+    });
+
+    if (points.length < 2) {
+      return;
+    }
+
+    const firstPoint = segment[0];
+
+    const nearbyPoint = [
+      firstPoint[0] + 12 / 111320,
+      firstPoint[1]
+    ];
+
+    const startPixel =
+      map.latLngToContainerPoint(firstPoint);
+
+    const nearbyPixel =
+      map.latLngToContainerPoint(nearbyPoint);
+
+    const revealRadius = Math.max(
+      2,
+      Math.abs(startPixel.y - nearbyPixel.y)
+    );
+
+    function drawRoutePath() {
+
+      fogContext.beginPath();
+
+      points.forEach((point, index) => {
+
+        if (index === 0) {
+          fogContext.moveTo(point.x, point.y);
+        } else {
+          fogContext.lineTo(point.x, point.y);
+        }
+
+      });
+
+    }
+
+    // Soft outer edge.
+    fogContext.save();
+
+    drawRoutePath();
+
+    fogContext.filter = "blur(8px)";
+    fogContext.lineWidth = revealRadius * 2.2;
+    fogContext.lineCap = "round";
+    fogContext.lineJoin = "round";
+    fogContext.strokeStyle = "black";
+
+    fogContext.stroke();
+
+    fogContext.restore();
+
+    // Clearer centre.
+    drawRoutePath();
+
+    fogContext.filter = "none";
+    fogContext.lineWidth = revealRadius * 1.5;
+    fogContext.lineCap = "round";
+    fogContext.lineJoin = "round";
+    fogContext.strokeStyle = "black";
+
+    fogContext.stroke();
+
+  });
+
+  fogContext.globalCompositeOperation = "source-over";
+  fogContext.filter = "none";
+
+}
+
+
+// ------------------------------------------
+// SCHEDULE FOG REDRAWS
+// ------------------------------------------
+
+// Leaflet can fire several map events close together.
+// This makes sure the fog is only redrawn once per frame.
+
+let fogUpdateScheduled = false;
+
+function scheduleFogUpdate() {
+
+  if (fogUpdateScheduled) {
+    return;
+  }
+
+  fogUpdateScheduled = true;
+
+  requestAnimationFrame(() => {
+
+    fogUpdateScheduled = false;
+
+    updateFogLayer();
+
+  });
+
+}
+
+
+// Redraw the fog when the map changes.
+map.on("moveend zoomend resize", scheduleFogUpdate);
+
+
+/* ------------------------------------------
+   11. ADD, EDIT AND DELETE PINS
 ------------------------------------------ */
 
 const addPinButton =
@@ -798,14 +975,11 @@ let pendingPinLocation = null;
 let editingPinIndex = null;
 
 
-// Open the editor.
-
 function openPinEditor(index = null) {
 
   editingPinIndex = index;
 
   addingPin = false;
-
 
   if (index !== null) {
 
@@ -844,15 +1018,12 @@ function openPinEditor(index = null) {
 
   }
 
-
   updatePinSaveButton();
 
   pinModal.classList.remove("is-hidden");
 
 }
 
-
-// Enable save only after a location is selected.
 
 function updatePinSaveButton() {
 
@@ -862,8 +1033,6 @@ function updatePinSaveButton() {
 }
 
 
-// Close the editor.
-
 function closePinEditor() {
 
   pinModal.classList.add("is-hidden");
@@ -871,29 +1040,21 @@ function closePinEditor() {
   addingPin = false;
 
   if (addPinButton) {
-
     addPinButton.classList.remove("active");
     addPinButton.textContent = "+";
-
   }
 
 }
 
 
-// Add button opens a new memory.
-
 if (addPinButton) {
 
   addPinButton.addEventListener("click", () => {
-
     openPinEditor();
-
   });
 
 }
 
-
-// Choose a location on the map.
 
 choosePinLocation.addEventListener("click", () => {
 
@@ -907,8 +1068,6 @@ choosePinLocation.addEventListener("click", () => {
 
 });
 
-
-// Map click selects a location when choosing a pin.
 
 map.on("click", event => {
 
@@ -935,8 +1094,6 @@ map.on("click", event => {
 });
 
 
-// Save a new pin or update an existing one.
-
 pinForm.addEventListener("submit", event => {
 
   event.preventDefault();
@@ -944,7 +1101,6 @@ pinForm.addEventListener("submit", event => {
   if (!pendingPinLocation) {
     return;
   }
-
 
   const updatedPin = {
 
@@ -961,17 +1117,11 @@ pinForm.addEventListener("submit", event => {
 
   };
 
-
   if (editingPinIndex !== null) {
-
     pins[editingPinIndex] = updatedPin;
-
   } else {
-
     pins.push(updatedPin);
-
   }
-
 
   saveMapData();
 
@@ -983,8 +1133,6 @@ pinForm.addEventListener("submit", event => {
 
 });
 
-
-// Delete an existing pin.
 
 deletePinButton.addEventListener("click", () => {
 
@@ -1013,8 +1161,6 @@ deletePinButton.addEventListener("click", () => {
 });
 
 
-// Cancel or close the editor.
-
 cancelPinButton.addEventListener(
   "click",
   closePinEditor
@@ -1026,8 +1172,6 @@ closePinModal.addEventListener(
 );
 
 
-// Close when clicking the dark background.
-
 pinModal.addEventListener("click", event => {
 
   if (event.target === pinModal) {
@@ -1036,8 +1180,6 @@ pinModal.addEventListener("click", event => {
 
 });
 
-
-// Close with Escape.
 
 document.addEventListener("keydown", event => {
 
@@ -1052,7 +1194,7 @@ document.addEventListener("keydown", event => {
 
 
 /* ------------------------------------------
-   10. CURRENT LOCATION
+   12. CURRENT LOCATION
 ------------------------------------------ */
 
 const locationButton =
@@ -1066,7 +1208,6 @@ function updateCurrentPositionMarker(position) {
     position.coords.longitude
   ];
 
-
   if (currentPositionMarker) {
 
     currentPositionMarker.setLatLng(newPosition);
@@ -1079,7 +1220,7 @@ function updateCurrentPositionMarker(position) {
         radius: 8,
         color: "#FFFFFF",
         weight: 3,
-        fillColor: "#111111",
+        fillColor: "#228B22",
         fillOpacity: 1,
         pane: "memoryPane"
       }
@@ -1092,29 +1233,22 @@ function updateCurrentPositionMarker(position) {
 }
 
 
-// Center map on current location.
-
 function centerOnCurrentLocation() {
 
   if (!navigator.geolocation) {
-
     updateTrackingStatus("GPS not supported");
     return;
-
   }
 
   updateTrackingStatus("Finding your location...");
-
 
   navigator.geolocation.getCurrentPosition(
 
     position => {
 
       if (position.coords.accuracy > 1000) {
-
         updateTrackingStatus("GPS signal inaccurate");
         return;
-
       }
 
       const newPosition =
@@ -1126,7 +1260,6 @@ function centerOnCurrentLocation() {
 
     },
 
-
     error => {
 
       console.error("Location error:", error);
@@ -1136,7 +1269,6 @@ function centerOnCurrentLocation() {
       );
 
     },
-
 
     {
       enableHighAccuracy: true,
@@ -1160,7 +1292,7 @@ if (locationButton) {
 
 
 /* ------------------------------------------
-   11. GPS TRACKING
+   13. GPS TRACKING
 ------------------------------------------ */
 
 const trackingButton =
@@ -1182,10 +1314,8 @@ function updateTrackingStatus(message) {
 function startTracking() {
 
   if (!navigator.geolocation) {
-
     updateTrackingStatus("GPS not supported");
     return;
-
   }
 
   if (tracking) {
@@ -1194,25 +1324,19 @@ function startTracking() {
 
   tracking = true;
 
-
   // Create a new segment for this session.
-
   activeRouteSegment = [];
 
   routeSegments.push(activeRouteSegment);
 
   saveMapData();
 
-
   if (trackingButton) {
-
     trackingButton.textContent = "Stop tracking";
     trackingButton.classList.add("active");
-
   }
 
   updateTrackingStatus("Waiting for GPS...");
-
 
   watchId = navigator.geolocation.watchPosition(
 
@@ -1220,25 +1344,17 @@ function startTracking() {
 
       const accuracy = position.coords.accuracy;
 
-
       // Ignore inaccurate GPS readings.
-
       if (accuracy > 1000) {
-
         updateTrackingStatus("GPS signal inaccurate");
         return;
-
       }
 
-
-      // Update location marker without moving the map.
-
+      // Update location marker.
       const newPosition =
         updateCurrentPositionMarker(position);
 
-
-      // Compare with the last point in this session.
-
+      // Compare with the last point.
       if (activeRouteSegment.length > 0) {
 
         const lastPosition =
@@ -1257,19 +1373,22 @@ function startTracking() {
 
       }
 
-
       // Add new GPS point.
-
       activeRouteSegment.push(newPosition);
 
       drawRoute();
+
+      // Recalculate contours only when route data changes,
+      // not when the user zooms or pans.
+      drawContourLines();
+
       updateFogLayer();
+
       saveMapData();
 
       updateTrackingStatus("Tracking your movement");
 
     },
-
 
     error => {
 
@@ -1282,7 +1401,6 @@ function startTracking() {
       stopTracking();
 
     },
-
 
     {
       enableHighAccuracy: true,
@@ -1299,17 +1417,12 @@ function stopTracking() {
 
   tracking = false;
 
-
   if (watchId !== null) {
-
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
-
   }
 
-
   // Remove an empty session.
-
   if (
     activeRouteSegment &&
     activeRouteSegment.length === 0
@@ -1324,20 +1437,17 @@ function stopTracking() {
 
   }
 
-
   activeRouteSegment = null;
 
   saveMapData();
 
   drawRoute();
+  drawContourLines();
   updateFogLayer();
 
-
   if (trackingButton) {
-
     trackingButton.textContent = "Start tracking";
     trackingButton.classList.remove("active");
-
   }
 
   updateTrackingStatus("Tracking stopped");
@@ -1361,7 +1471,7 @@ if (trackingButton) {
 
 
 /* ------------------------------------------
-   12. EXPORT MAP DATA
+   14. EXPORT MAP DATA
 ------------------------------------------ */
 
 function exportMapData() {
@@ -1410,7 +1520,7 @@ if (exportButton) {
 
 
 /* ------------------------------------------
-   13. IMPORT MAP DATA
+   15. IMPORT MAP DATA
 ------------------------------------------ */
 
 const importButton =
@@ -1437,7 +1547,6 @@ if (importButton && importFile) {
 
     const reader = new FileReader();
 
-
     reader.onload = loadEvent => {
 
       try {
@@ -1446,9 +1555,7 @@ if (importButton && importFile) {
           loadEvent.target.result
         );
 
-
         // Support current and older route formats.
-
         let importedSegments;
 
         if (Array.isArray(importedData.routeSegments)) {
@@ -1469,11 +1576,9 @@ if (importButton && importFile) {
 
         }
 
-
         if (!Array.isArray(importedData.pins)) {
           throw new Error("Invalid pin data");
         }
-
 
         const confirmed = confirm(
           "Importing this file will replace the map data currently saved on this device. Continue?"
@@ -1483,20 +1588,16 @@ if (importButton && importFile) {
           return;
         }
 
-
         // Stop tracking before replacing data.
-
         if (tracking) {
           stopTracking();
         }
 
         activeRouteSegment = null;
 
-
         routeSegments = importedSegments.filter(
           segment => Array.isArray(segment)
         );
-
 
         pins = importedData.pins.filter(pin =>
           pin &&
@@ -1504,11 +1605,11 @@ if (importButton && importFile) {
           Number.isFinite(Number(pin.lng))
         );
 
-
         saveMapData();
 
         drawRoute();
         drawPins();
+        drawContourLines();
         updateFogLayer();
 
         alert("Map data imported successfully!");
@@ -1523,11 +1624,9 @@ if (importButton && importFile) {
 
       }
 
-
       importFile.value = "";
 
     };
-
 
     reader.readAsText(file);
 
@@ -1537,7 +1636,7 @@ if (importButton && importFile) {
 
 
 /* ------------------------------------------
-   14. INITIALISE
+   16. INITIALISE
 ------------------------------------------ */
 
 loadMapData();
